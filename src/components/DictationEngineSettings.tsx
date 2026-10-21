@@ -1,4 +1,4 @@
-// Security: the harness keeps the speech server key; the renderer sends it once to PUT /api/config and never reads it back.
+// Security: the speech server key is write-only here. The desktop app saves it in the OS-encrypted store; the page only sees keyConfigured.
 import { useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 
@@ -24,12 +24,12 @@ export function DictationEngineSettings({ appleAvailable }: { appleAvailable: bo
     setLanguage(stt?.language ?? "");
   }, [stt?.url, stt?.model, stt?.language]);
 
-  const save = (patch: Record<string, string>) => {
+  const save = (request: () => Promise<ConfigStatus>) => {
     if (saving) return;
     setSaving(true);
     setError(null);
-    api("/api/config", { method: "PUT", body: JSON.stringify({ stt: patch }) })
-      .then((status: ConfigStatus) => {
+    request()
+      .then((status) => {
         dispatch({ type: "configStatus", config: status });
         setKey("");
       })
@@ -37,14 +37,19 @@ export function DictationEngineSettings({ appleAvailable }: { appleAvailable: bo
       .finally(() => setSaving(false));
   };
 
+  const putSettings = (stt: Record<string, string>) =>
+    api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ stt }) });
+
+  // credential:set writes the OS-encrypted store and then the server; a browser without the desktop bridge sends it to PUT /api/config.
+  const writeKey = (value: string) => (window.ogb?.setCredential
+    ? window.ogb.setCredential("sttKey", value)
+    : putSettings({ key: value }));
+
   const saveServer = () => {
     const nextKey = key.trim();
-    save({
-      engine: "openai-compatible",
-      url: url.trim(),
-      model: model.trim(),
-      language: language.trim(),
-      ...(nextKey ? { key: nextKey } : {}),
+    save(async () => {
+      const status = await putSettings({ engine: "openai-compatible", url: url.trim(), model: model.trim(), language: language.trim() });
+      return nextKey ? writeKey(nextKey) : status;
     });
   };
 
@@ -65,7 +70,7 @@ export function DictationEngineSettings({ appleAvailable }: { appleAvailable: bo
             aria-checked={engine === option.value}
             disabled={saving || !option.available}
             title={!option.available ? t("stt.engine.appleOnly") : undefined}
-            onClick={() => engine !== option.value && save({ engine: option.value })}
+            onClick={() => engine !== option.value && save(() => putSettings({ engine: option.value }))}
             className={cn(
               "rounded-lg px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50",
               engine === option.value ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink",
@@ -128,7 +133,7 @@ export function DictationEngineSettings({ appleAvailable }: { appleAvailable: bo
             {stt?.keyConfigured ? (
               <button
                 type="button"
-                onClick={() => save({ key: "" })}
+                onClick={() => save(() => writeKey(""))}
                 disabled={saving}
                 className="text-[12px] font-medium text-danger hover:underline disabled:opacity-50"
               >

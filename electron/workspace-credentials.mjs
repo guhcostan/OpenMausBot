@@ -10,6 +10,7 @@ export const WORKSPACE_CREDENTIALS = [
   { section: "imageGen", field: "customApiKey", name: "customImageApiKey", env: "OMB_CUSTOM_IMAGE_KEY" },
   { section: "live", field: "key", name: "openaiLiveKey", env: "OMB_OPENAI_LIVE_KEY" },
   { section: "treg", field: "key", name: "tregApiKey", env: "OMB_TREG_KEY" },
+  { section: "stt", field: "key", name: "sttKey", env: "OMB_STT_KEY" },
   { section: "opencodeGo", field: "apiKey", name: "opencodeGoApiKey", env: "OPENCODE_API_KEY" },
 ];
 

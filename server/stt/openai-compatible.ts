@@ -19,7 +19,10 @@ export function openAiCompatibleStt(config: SttConfig): SttProvider {
         signal: AbortSignal.timeout(120_000),
       });
       if (!response.ok) throw new Error(`The speech server answered ${response.status}.`);
-      return { text: transcription.parse(await response.json()).text.trim() };
+      // A non-JSON 200 (an HTML login page, a proxy error) must not reach the caller: its SyntaxError can echo the body.
+      const answer = transcription.safeParse(await response.json().catch(() => null));
+      if (!answer.success) throw new Error("The speech server answered with something other than a transcript.");
+      return { text: answer.data.text.trim() };
     },
   };
 }

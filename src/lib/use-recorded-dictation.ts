@@ -5,7 +5,6 @@ import { t } from "./i18n";
 interface Capture {
   draftId: string;
   recorder: MediaRecorder;
-  stream: MediaStream;
   chunks: Blob[];
   discard: boolean;
 }
@@ -24,8 +23,11 @@ export function useRecordedDictation({ draftId, text, onText, available }: {
   draft.current = { id: draftId, text };
   const capture = useRef<Capture | null>(null);
   const starting = useRef(false);
+  // Bumped by stop(): a getUserMedia still pending then finds it is stale and releases its stream.
+  const generation = useRef(0);
 
   const stop = useCallback(() => {
+    generation.current += 1;
     const current = capture.current;
     if (!current) {
       setRecording(false);
@@ -36,13 +38,12 @@ export function useRecordedDictation({ draftId, text, onText, available }: {
   }, []);
 
   useEffect(() => {
-    const current = capture.current;
-    if (current && current.draftId !== draftId) stop();
+    stop();
   }, [draftId, stop]);
 
   useEffect(() => stop, [stop]);
 
-  const transcribe = async (blob: Blob) => {
+  const transcribe = async (blob: Blob, forDraft: string) => {
     try {
       const { text: heard } = await api<{ text: string }>("/api/stt/transcribe", {
         method: "POST",
@@ -50,29 +51,36 @@ export function useRecordedDictation({ draftId, text, onText, available }: {
         body: blob,
         timeoutMs: 180_000,
       });
+      // The upload can outlive the draft it was recorded for: never write into another draft.
+      if (draft.current.id !== forDraft) return;
       const spoken = heard.trim();
       if (!spoken) return;
       const current = draft.current.text;
       onText(current ? `${current}${/\s$/.test(current) ? "" : " "}${spoken}` : spoken);
     } catch {
-      setSpeechError(t("composer.dictation.remoteFailed"));
+      if (draft.current.id === forDraft) setSpeechError(t("composer.dictation.remoteFailed"));
     }
   };
 
   const start = async () => {
     starting.current = true;
+    const attempt = generation.current;
     setSpeechError(null);
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
       starting.current = false;
-      setSpeechError(t("composer.dictation.microphone"));
+      if (attempt === generation.current) setSpeechError(t("composer.dictation.microphone"));
       return;
     }
     starting.current = false;
+    if (attempt !== generation.current) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
     const recorder = new MediaRecorder(stream);
-    const session: Capture = { draftId, recorder, stream, chunks: [], discard: false };
+    const session: Capture = { draftId, recorder, chunks: [], discard: false };
     recorder.ondataavailable = (event) => {
       if (event.data.size) session.chunks.push(event.data);
     };
@@ -82,7 +90,7 @@ export function useRecordedDictation({ draftId, text, onText, available }: {
       setRecording(false);
       if (session.discard || draft.current.id !== session.draftId) return;
       const blob = new Blob(session.chunks, { type: recorder.mimeType || "audio/webm" });
-      if (blob.size) void transcribe(blob);
+      if (blob.size) void transcribe(blob, session.draftId);
     };
     capture.current = session;
     recorder.start();

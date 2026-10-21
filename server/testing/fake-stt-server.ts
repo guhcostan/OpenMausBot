@@ -13,12 +13,13 @@ export interface FakeSttServer {
   url: string;
   requests: FakeSttRequest[];
   answer(status: number, body: unknown): void;
+  answerRaw(status: number, text: string): void;
   stop(): Promise<void>;
 }
 
 export async function startFakeSttServer(): Promise<FakeSttServer> {
   const requests: FakeSttRequest[] = [];
-  let next: { status: number; body: unknown } = { status: 200, body: { text: " hola mundo " } };
+  let next: { status: number; body: unknown; raw?: string } = { status: 200, body: { text: " hola mundo " } };
   const server: Server = createServer(async (req, res) => {
     const raw = await collect(req);
     const form = await new Response(raw, { headers: { "content-type": req.headers["content-type"] ?? "" } }).formData();
@@ -29,6 +30,11 @@ export async function startFakeSttServer(): Promise<FakeSttServer> {
       else file = { name: value.name, type: value.type, bytes: Buffer.from(await value.arrayBuffer()) };
     }
     requests.push({ path: req.url ?? "", authorization: req.headers.authorization, fields, file });
+    if (next.raw !== undefined) {
+      res.writeHead(next.status, { "content-type": "text/html" });
+      res.end(next.raw);
+      return;
+    }
     res.writeHead(next.status, { "content-type": "application/json" });
     res.end(JSON.stringify(next.body));
   });
@@ -39,6 +45,9 @@ export async function startFakeSttServer(): Promise<FakeSttServer> {
     requests,
     answer(status, body) {
       next = { status, body };
+    },
+    answerRaw(status, text) {
+      next = { status, body: null, raw: text };
     },
     stop: () => new Promise<void>((done) => server.close(() => done())),
   };

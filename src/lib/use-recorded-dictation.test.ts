@@ -42,11 +42,13 @@ describe("recorded dictation for the OpenAI-compatible engine", () => {
   let onText: Mock<(text: string) => void>;
   let track: { stop: ReturnType<typeof vi.fn> };
   let getUserMedia: ReturnType<typeof vi.fn>;
+  let unmounted: boolean;
 
   const render = (text: string, draftId = "draft-1") =>
     act(() => root.render(createElement(Probe, { draftId, text, onText, available: true })));
 
   beforeEach(() => {
+    unmounted = false;
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -59,7 +61,7 @@ describe("recorded dictation for the OpenAI-compatible engine", () => {
   });
 
   afterEach(() => {
-    act(() => root.unmount());
+    if (!unmounted) act(() => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
     FakeRecorder.last = null;
@@ -99,6 +101,47 @@ describe("recorded dictation for the OpenAI-compatible engine", () => {
 
     expect(latest.recording).toBe(false);
     expect(latest.speechError).toBe(t("composer.dictation.microphone"));
+  });
+
+  it("drops a transcript whose draft was left while the clip uploaded", async () => {
+    let answer!: (value: { text: string }) => void;
+    vi.mocked(api).mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+    render("oi");
+    await act(async () => latest.toggle());
+    await act(async () => latest.toggle());
+
+    render("oi", "draft-2");
+    await act(async () => answer({ text: "ola" }));
+
+    expect(onText).not.toHaveBeenCalled();
+  });
+
+  it("releases the microphone when the draft changes while the permission prompt is open", async () => {
+    let grant!: (stream: MediaStream) => void;
+    getUserMedia.mockReturnValueOnce(new Promise<MediaStream>((resolve) => { grant = resolve; }));
+    render("");
+    await act(async () => latest.toggle());
+
+    render("", "draft-2");
+    await act(async () => grant({ getTracks: () => [track] } as unknown as MediaStream));
+
+    expect(track.stop).toHaveBeenCalled();
+    expect(FakeRecorder.last).toBeNull();
+    expect(latest.recording).toBe(false);
+  });
+
+  it("releases the microphone when the composer unmounts while the permission prompt is open", async () => {
+    let grant!: (stream: MediaStream) => void;
+    getUserMedia.mockReturnValueOnce(new Promise<MediaStream>((resolve) => { grant = resolve; }));
+    render("");
+    await act(async () => latest.toggle());
+
+    unmounted = true;
+    act(() => root.unmount());
+    await act(async () => grant({ getTracks: () => [track] } as unknown as MediaStream));
+
+    expect(track.stop).toHaveBeenCalled();
+    expect(FakeRecorder.last).toBeNull();
   });
 
   it("reports a failed transcription and leaves the draft untouched", async () => {

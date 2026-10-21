@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -31,10 +31,28 @@ async function serve(stt: SttSettings | undefined) {
   servers.push(server);
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  return async (contentType: string, bytes: Uint8Array) => {
+  const post = async (contentType: string, bytes: Uint8Array) => {
     const response = await fetch(`${base}/api/stt/transcribe`, { method: "POST", headers: { "content-type": contentType }, body: bytes });
     return { status: response.status, body: await response.json() as any };
   };
+  return Object.assign(post, { base });
+}
+
+/** Reads the 413 as soon as it arrives: the server closes after answering, so a fetch still uploading would fail first. */
+function postWithoutWaiting(base: string, bytes: Uint8Array) {
+  return new Promise<{ status: number; body: any }>((resolve, reject) => {
+    const req = request(`${base}/api/stt/transcribe`, {
+      method: "POST",
+      headers: { "content-type": "audio/webm", "content-length": String(bytes.length) },
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => resolve({ status: response.statusCode ?? 0, body: JSON.parse(Buffer.concat(chunks).toString()) }));
+      response.on("error", reject);
+    });
+    req.on("error", reject);
+    req.end(bytes);
+  });
 }
 
 const clip = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]);
@@ -97,7 +115,29 @@ describe("POST /api/stt/transcribe", () => {
     const reply = await post("audio/webm", clip);
 
     expect(reply.status).toBe(502);
-    expect(reply.body.error).toBe("The speech server answered 401.");
+    expect(reply.body.error).toBe("The speech server could not transcribe the recording.");
     expect(JSON.stringify(reply.body)).not.toContain("sk-secret-123");
+  });
+
+  it("does not echo a 200 HTML page (a login wall, a proxy error) that carries the key", async () => {
+    const fake = await startFakeSttServer();
+    fakes.push(fake);
+    fake.answerRaw(200, "<html>sign in sk-secret-123</html>");
+    const post = await serve({ engine: "openai-compatible", url: fake.url, key: "sk-secret-123" });
+    const reply = await post("audio/webm", clip);
+
+    expect(reply.status).toBe(502);
+    expect(reply.body).toEqual({ error: "The speech server could not transcribe the recording." });
+  });
+
+  it("answers 413 past 25 MB and never forwards the clip", async () => {
+    const fake = await startFakeSttServer();
+    fakes.push(fake);
+    const post = await serve({ engine: "openai-compatible", url: fake.url });
+    const reply = await postWithoutWaiting(post.base, new Uint8Array(25 * 1024 * 1024 + 1));
+
+    expect(reply.status).toBe(413);
+    expect(reply.body.error).toMatch(/25 MB/);
+    expect(fake.requests).toHaveLength(0);
   });
 });

@@ -29,7 +29,7 @@ export const sttSettingsSchema = z.object({
   url: sttUrl,
   model: z.string().trim().max(200).optional(),
   language: z.string().trim().max(20).regex(/^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})?$/, "a language is a code such as pt or en-US").optional(),
-  key: z.string().optional(),
+  key: z.string().max(4096).optional(),
 });
 
 export type SttSettings = z.output<typeof sttSettingsSchema>;

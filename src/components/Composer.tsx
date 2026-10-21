@@ -1,7 +1,8 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
+<import { useRecordedDictation } from "@/lib/use-recorded-dictation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type SetStateAction } from "react";
-import { ArrowUp, Clock, Mic, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Sparkles, Square, Target, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
@@ -220,9 +221,14 @@ export function Composer({
     },
     [text, editText, editAttachments],
   );
-  const { recording, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({
+  const remoteDictation = state.config?.stt?.engine === "openai-compatible";
+  const remoteDictationReady = remoteDictation && state.config?.stt?.ready === true && typeof MediaRecorder !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
+  const appleDictation = useComposerDictation({
     draftId, text, onText: editText, available: capabilities.dictation.available,
   });
+  const recordedDictation = useRecordedDictation({ draftId, text, onText: editText, available: remoteDictationReady });
+  const { recording, speechError, toggle: toggleMic, stop: stopDictation } = remoteDictation ? recordedDictation : appleDictation;
+  const dictationAvailable = remoteDictation ? remoteDictationReady : capabilities.dictation.available;
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
@@ -980,7 +986,7 @@ export function Composer({
             <Square size={14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && capabilities.dictation.available && (
+        {!locked && !busy && dictationAvailable && (
           <button
             onClick={toggleMic}
             aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}

@@ -21,6 +21,15 @@ export interface ConfigStatus {
   openai?: { configured: boolean };
   openrouter?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
+  /** Dictation engine. `ready`: the OpenAI-compatible server has an address. The key itself is never echoed back. */
+  stt?: {
+    engine: "apple" | "openai-compatible";
+    url: string;
+    model: string;
+    language: string;
+    keyConfigured: boolean;
+    ready: boolean;
+  };
   /** what this server is entitled to; Settings shows only what works here.
    * `license` reaches admins only, and only while the key is inside its
    * warning window or grace period. */

@@ -18,6 +18,7 @@ import {
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { voiceKeyDraftValue, type VoiceKeyDraft } from "@/lib/voice-key-draft";
+import { DictationEngineSettings } from "./DictationEngineSettings";
 import { VoicePicker, type PickerVoice } from "./VoicePicker";
 import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
@@ -546,6 +547,8 @@ export function VoiceSettings({
           onClick={() => onPatch({ voiceNotes: bot.voiceNotes === false })}
         />
       </div>
+
+      {!workspaceConfigurationLocked && <DictationEngineSettings appleAvailable={capabilities.dictation.available} />}
 
       {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
     </div>
